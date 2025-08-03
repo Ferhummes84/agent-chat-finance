@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/components/ui/use-toast";
-import { Send, Bot, User, Loader2 } from "lucide-react";
+import { Send, Bot, User, Loader2, ArrowLeft, MessageSquare } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 
 interface Message {
@@ -34,7 +35,10 @@ const Chat = () => {
   const [currentMessage, setCurrentMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentConversation, setCurrentConversation] = useState<string | null>(null);
+  const [conversationTitle, setConversationTitle] = useState<string>("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -73,6 +77,37 @@ const Chat = () => {
     if (!session?.user) return;
 
     try {
+      const conversationIdFromUrl = searchParams.get('conversation');
+      
+      if (conversationIdFromUrl) {
+        // Load specific conversation from URL
+        const { data: conversation, error: convError } = await supabase
+          .from('conversations')
+          .select('id, title')
+          .eq('id', conversationIdFromUrl)
+          .eq('user_id', session.user.id)
+          .single();
+
+        if (convError) throw convError;
+        
+        setCurrentConversation(conversationIdFromUrl);
+        setConversationTitle(conversation.title || 'Conversa');
+        
+        // Load messages for this conversation
+        const { data: messages, error: messagesError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationIdFromUrl)
+          .order('created_at', { ascending: true });
+
+        if (messagesError) throw messagesError;
+        setMessages((messages || []).map(msg => ({
+          ...msg,
+          role: msg.role as 'user' | 'assistant'
+        })));
+        
+        return;
+      }
       // Try to get the most recent conversation
       const { data: conversations, error: fetchError } = await supabase
         .from('conversations')
@@ -84,11 +119,14 @@ const Chat = () => {
       if (fetchError) throw fetchError;
 
       let conversationId: string;
+      let title: string;
 
       if (conversations && conversations.length > 0) {
         // Use existing conversation
         conversationId = conversations[0].id;
+        title = conversations[0].title || 'Conversa';
         setCurrentConversation(conversationId);
+        setConversationTitle(title);
         
         // Load messages for this conversation
         const { data: messages, error: messagesError } = await supabase
@@ -103,28 +141,18 @@ const Chat = () => {
           role: msg.role as 'user' | 'assistant'
         })));
       } else {
-        // Create new conversation
-        const { data: newConversation, error: createError } = await supabase
-          .from('conversations')
-          .insert({
-            user_id: session.user.id,
-            title: 'Nova Conversa'
-          })
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        
-        conversationId = newConversation.id;
-        setCurrentConversation(conversationId);
-        setMessages([]);
+        // Redirect to chat history if no conversations exist
+        navigate('/chat-history');
+        return;
       }
     } catch (error: any) {
+      console.error('Erro ao carregar conversa:', error);
       toast({
         title: "Erro",
         description: "Não foi possível carregar a conversa",
         variant: "destructive",
       });
+      navigate('/chat-history');
     }
   };
 
@@ -156,6 +184,8 @@ const Chat = () => {
       }]);
 
       // Send message to webhook
+      console.log('Enviando mensagem para webhook:', userMessage);
+      
       const response = await fetch('https://n8n.automabot.net.br/webhook/trader', {
         method: 'POST',
         headers: {
@@ -168,11 +198,19 @@ const Chat = () => {
         }),
       });
 
+      console.log('Resposta do webhook status:', response.status);
+
       if (!response.ok) {
-        throw new Error('Erro na comunicação com o agente');
+        console.error('Erro na resposta do webhook:', response.status, response.statusText);
+        throw new Error(`Erro na comunicação com o agente: ${response.status}`);
       }
 
       const aiResponse = await response.text();
+      console.log('Resposta da IA recebida:', aiResponse);
+
+      if (!aiResponse || aiResponse.trim() === '') {
+        throw new Error('Resposta vazia do agente IA');
+      }
 
       // Add AI response to database
       const { data: aiMessageData, error: aiError } = await supabase
@@ -185,7 +223,12 @@ const Chat = () => {
         .select()
         .single();
 
-      if (aiError) throw aiError;
+      if (aiError) {
+        console.error('Erro ao salvar resposta da IA:', aiError);
+        throw aiError;
+      }
+
+      console.log('Resposta da IA salva no banco:', aiMessageData);
 
       // Add AI response to local state
       setMessages(prev => [...prev, {
@@ -228,17 +271,29 @@ const Chat = () => {
     );
   }
 
+  const goBack = () => {
+    navigate('/chat-history');
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <div className="border-b border-border/50 trading-card p-4">
         <div className="flex items-center space-x-3">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={goBack}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
           <div className="w-10 h-10 rounded-lg trading-gradient flex items-center justify-center">
             <Bot className="w-5 h-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="font-semibold text-foreground">Agente Trader</h1>
-            <p className="text-sm text-muted-foreground">Seu assistente financeiro IA</p>
+            <h1 className="font-semibold text-foreground">{conversationTitle}</h1>
+            <p className="text-sm text-muted-foreground">Agente Trader</p>
           </div>
         </div>
       </div>

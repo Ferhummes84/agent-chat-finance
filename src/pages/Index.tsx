@@ -16,7 +16,7 @@ const Index = () => {
       setLoading(false);
       
       if (session) {
-        navigate("/chat");
+        navigate("/chat-history");
       } else {
         navigate("/auth");
       }
@@ -28,7 +28,7 @@ const Index = () => {
         setSession(session);
         
         if (session) {
-          navigate("/chat");
+          navigate("/chat-history");
         } else {
           navigate("/auth");
         }
