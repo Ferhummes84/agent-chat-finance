@@ -186,24 +186,40 @@ const Chat = () => {
       // Send message to webhook
       console.log('Enviando mensagem para webhook:', userMessage);
       
+      // Test webhook connectivity first
+      try {
+        const testResponse = await fetch('https://n8n.automabot.net.br/webhook/trader', {
+          method: 'HEAD',
+          mode: 'no-cors'
+        });
+        console.log('Teste de conectividade webhook concluído');
+      } catch (testError) {
+        console.warn('Webhook pode estar inacessível:', testError);
+      }
+
       const response = await fetch('https://n8n.automabot.net.br/webhook/trader', {
         method: 'POST',
         mode: 'cors',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/plain, application/json',
         },
         body: JSON.stringify({
           message: userMessage,
           user_id: session.user.id,
           conversation_id: currentConversation
         }),
+        signal: AbortSignal.timeout(30000) // 30 second timeout
       });
 
       console.log('Resposta do webhook status:', response.status);
+      console.log('Resposta do webhook headers:', response.headers);
 
       if (!response.ok) {
         console.error('Erro na resposta do webhook:', response.status, response.statusText);
-        throw new Error(`Erro na comunicação com o agente: ${response.status}`);
+        const errorText = await response.text().catch(() => 'Sem detalhes do erro');
+        console.error('Detalhes do erro:', errorText);
+        throw new Error(`Webhook retornou status ${response.status}: ${errorText || response.statusText}`);
       }
 
       const aiResponse = await response.text();
