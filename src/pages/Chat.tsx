@@ -188,6 +188,7 @@ const Chat = () => {
       
       const response = await fetch('https://n8n.automabot.net.br/webhook/trader', {
         method: 'POST',
+        mode: 'cors',
         headers: {
           'Content-Type': 'application/json',
         },
